@@ -1,0 +1,8 @@
+backend/.venv/
+backend/data/synthetic_traffic.csv
+__pycache__/
+*.pyc
+frontend/node_modules/
+frontend/dist/
+.env
+.DS_Store
