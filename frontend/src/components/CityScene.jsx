@@ -810,6 +810,8 @@ function cameraPreset(mode) {
 
 export default function CityScene({
   phase = "NS",
+  phaseStage = "GREEN",
+  counts = null,
   incident = false,
   density = 0.55,
   weather = "clear",
@@ -821,7 +823,7 @@ export default function CityScene({
 }) {
   const hostRef = useRef(null);
   const settingsRef = useRef({});
-  settingsRef.current = { phase, incident, density, weather, hour, cameraMode, paused, simulationSpeed, resetCameraKey };
+  settingsRef.current = { phase, phaseStage, counts, incident, density, weather, hour, cameraMode, paused, simulationSpeed, resetCameraKey };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -961,13 +963,14 @@ export default function CityScene({
       shadowInstances.instanceMatrix.needsUpdate = true;
     };
 
-    const setSignals = (greenAxis, isClearance, isDark) => {
+    const setSignals = (greenAxis, isClearance, isDark, phaseStage) => {
       for (const signal of world.signals) {
         const lane = lanes.find((candidate) => candidate.key === signal.label);
-        const isGreen = !isClearance && lane && lane.axis === greenAxis;
+        const isGreen = !isClearance && phaseStage === "GREEN" && lane && lane.axis === greenAxis;
+        const isYellow = !isClearance && phaseStage === "YELLOW" && lane && lane.axis === greenAxis;
         signal.lamps.forEach((lamp, index) => {
           const material = lamp.material;
-      const on = isGreen ? index === 2 : index === 0;
+      const on = isGreen ? index === 2 : isYellow ? index === 1 : index === 0;
           material.emissiveIntensity = on ? (isDark ? 2.8 : 1.2) : (index === 1 ? 0.18 : 0.035);
         });
       }
@@ -983,8 +986,8 @@ export default function CityScene({
       const physicalGap = 2.05;
       const braking = rainy ? 4.5 : 6.0;
       const dark = options.hour < 6 || options.hour >= 20;
-      const allRed = clearanceAxis !== null;
-      const greenAxis = allRed ? null : options.phase;
+      const allRed = clearanceAxis !== null || options.phaseStage === "ALL RED";
+      const greenAxis = allRed || options.phaseStage === "YELLOW" ? null : options.phase;
 
       for (const lane of lanes) {
         const ordered = lane.cars.filter((car) => car.active).sort((a, b) => b.progress - a.progress);
@@ -1060,7 +1063,8 @@ export default function CityScene({
       // Object-pool arrivals enter from the street edge only after a full safe gap opens.
       for (const lane of lanes) {
         let active = lane.cars.filter((car) => car.active).sort((a, b) => b.progress - a.progress);
-        if (active.length >= desiredCount) continue;
+        const laneTarget = clamp(Math.round(options.counts?.[lane.key] ?? desiredCount), 3, MAX_CARS_PER_LANE);
+        if (active.length >= laneTarget) continue;
         lane.spawnTimer = Math.min(1.2, lane.spawnTimer + dt);
         if (lane.spawnTimer < 1.1) continue;
         const candidate = lane.cars.find((car) => !car.active);
@@ -1149,7 +1153,7 @@ export default function CityScene({
           .map((car) => car.id + ":" + car.progress.toFixed(1) + "/" + car.speed.toFixed(1)))
         .join("|");
       world.incidentMarker.visible = options.incident;
-      setSignals(greenAxis, allRed, dark);
+      setSignals(greenAxis ?? options.phase, allRed, dark, options.phaseStage);
     };
 
     let pointer = null;
@@ -1286,7 +1290,7 @@ export default function CityScene({
   }, []);
 
   return <div className="city-scene" ref={hostRef} role="img" aria-label="Interactive New York City traffic intersection digital twin">
-    <div className="scene-overlay-label"><span><i/>LIVE DIGITAL TWIN</span>{cameraMode === "AI Analysis" && <span className="cv-overlay-chip">CV TRACKING · IDs / SPEED</span>}</div>
+    <div className="scene-overlay-label"><span><i/>SIMULATED DIGITAL TWIN</span>{cameraMode === "AI Analysis" && <span className="cv-overlay-chip">ILLUSTRATIVE TRACKING · IDs / SPEED</span>}</div>
     <div className="scene-compass">{cameraMode === "Street-level" || cameraMode === "Street" ? "STREET VIEW" : cameraMode === "Traffic cam" ? "CAM-07 · TRAFFIC CAM" : cameraMode === "AI Analysis" ? "AI PERCEPTION LAYER" : "MIDTOWN · 34 ST"}</div>
   </div>;
 }
