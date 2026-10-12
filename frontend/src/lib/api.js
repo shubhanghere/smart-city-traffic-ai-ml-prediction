@@ -1,9 +1,23 @@
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+export const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8000" : "");
+const REQUEST_TIMEOUT_MS = 60000;
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API}${path}`, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     ...options,
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+}
+
+export async function analyzeVision(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${API_BASE_URL}/api/vision/analyze`, {
+    method: "POST",
+    body: form,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(await response.text());
   return response.json();

@@ -3,7 +3,7 @@ import { Activity, AlertTriangle, BarChart3, Camera, ChevronDown, CircleHelp, Cl
 import CityScene from "./components/CityScene";
 import ControlPanel from "./components/ControlPanel";
 import MetricCard from "./components/MetricCard";
-import { getState, tick, control, optimize, summary, reset } from "./lib/api";
+import { getState, tick, control, optimize, summary, reset, analyzeVision } from "./lib/api";
 import "./styles.css";
 
 const initialState = { north:0,south:0,east:0,west:0,avg_speed:0,occupancy:0,queue_length:0,weather:"clear",incident:false,hour:17,phase:"NS",phase_remaining:32 };
@@ -38,9 +38,9 @@ function MetricStrip({ metrics }) {
   </div>;
 }
 
-function TwinView({ state, metrics, decision, density, incident, weather, aiControl, setDensity, setIncident, setWeather, setAiControl, hour, setHour, onReset, onScenario, cameraMode, setCameraMode, cameraResetKey, onCameraReset, paused, setPaused, speed, setSpeed, fullscreen }) {
+function TwinView({ state, metrics, decision, connectionStatus, density, incident, weather, aiControl, setDensity, setIncident, setWeather, setAiControl, hour, setHour, onReset, onScenario, cameraMode, setCameraMode, cameraResetKey, onCameraReset, paused, setPaused, speed, setSpeed, fullscreen }) {
   return <>
-    <div className="page-heading"><div><span className="eyebrow">NYC · MIDTOWN / 7TH AVE & W 34TH ST</span><h2>Intersection overview</h2><p>Live digital twin · 40.7506° N, 73.9877° W</p></div><div className="heading-actions"><span className="data-chip"><i className="pulse-dot"/> DATA STREAM ACTIVE</span><button className="icon-button" title="Toggle fullscreen" onClick={fullscreen}><Maximize2 size={16}/></button></div></div>
+    <div className="page-heading"><div><span className="eyebrow">NYC · MIDTOWN / 7TH AVE & W 34TH ST</span><h2>Intersection overview</h2><p>Live digital twin · 40.7506° N, 73.9877° W</p></div><div className="heading-actions"><span className="data-chip"><i className="pulse-dot"/> {connectionStatus === "connected" ? "DATA STREAM ACTIVE" : connectionStatus === "connecting" ? "CONNECTING TO BACKEND" : "BACKEND OFFLINE"}</span><button className="icon-button" title="Toggle fullscreen" onClick={fullscreen}><Maximize2 size={16}/></button></div></div>
     <div className="workspace-grid">
       <section className="visual-card">
         <div className="scene-head"><div><b>Midtown Manhattan · 34th Street</b><span>Procedural 3D environment · synchronized with simulation state</span></div><div className="scene-head-right"><span className={`phase-pill ${state.phase === "EW" ? "east" : "north"}`}><i/> {state.phase} GREEN · {state.phase_remaining}s</span><button className="icon-button"><ChevronDown size={15}/></button></div></div>
@@ -60,7 +60,7 @@ function TwinView({ state, metrics, decision, density, incident, weather, aiCont
 
 function AiDecision({decision,state}) {
   const ns=(state.north||0)+(state.south||0), ew=(state.east||0)+(state.west||0);
-  return <section className="panel ai-panel"><div className="panel-heading"><div className="heading-label"><Sparkles size={15}/><span>AI SIGNAL CONTROLLER</span></div><span className="ai-badge"><i/> INFERENCE LIVE</span></div>
+  return <section className="panel ai-panel"><div className="panel-heading"><div className="heading-label"><Sparkles size={15}/><span>AI SIGNAL CONTROLLER</span></div><span className="ai-badge"><i/> {decision ? "INFERENCE LIVE" : "INFERENCE OFFLINE"}</span></div>
     <div className="decision"><div className="decision-main"><small>RECOMMENDED PHASE</small><b>{decision?.recommended_phase || state.phase}</b><em>{decision?.green_seconds || state.phase_remaining}s optimized green window</em></div><div className="decision-bars"><div><span>North / south pressure</span><b>{ns}</b></div><div><span>East / west pressure</span><b>{ew}</b></div><div><span>Congestion forecast</span><b>{decision?.predicted_congestion ?? "—"}<small>/100</small></b></div></div></div>
     <ul className="rationale">{(decision?.rationale || ["Waiting for AI inference…"]).map((r,i)=><li key={i}>{r}</li>)}</ul>
   </section>;
@@ -92,7 +92,7 @@ function VisionView({state}) {
   const inputRef=useRef(null);
   useEffect(()=>()=>{if(preview)URL.revokeObjectURL(preview)},[preview]);
   const pick=(f)=>{if(!f)return;setFile(f);setPreview(URL.createObjectURL(f));setResult(null);setError("")};
-  const analyze=async()=>{if(!file)return;setBusy(true);setError("");try{const form=new FormData();form.append("file",file);const base=import.meta.env.VITE_API_URL||"http://127.0.0.1:8000";const res=await fetch(`${base}/api/vision/analyze`,{method:"POST",body:form});if(!res.ok)throw new Error(await res.text());setResult(await res.json())}catch(e){setError(e.message||"Could not analyze this file.")}finally{setBusy(false)}};
+  const analyze=async()=>{if(!file)return;setBusy(true);setError("");try{setResult(await analyzeVision(file))}catch(e){setError(e.name==="TimeoutError"?"The vision service timed out. Please try again.":e.message||"Could not analyze this file.")}finally{setBusy(false)}};
   return <><SectionTitle eyebrow="PERCEPTION / COMPUTER VISION" title="AI camera insights" description="Upload a traffic image for an OpenCV vehicle-region analysis. The live twin continues to provide network context." action={<span className="data-chip"><i className="pulse-dot"/> NETWORK CONTEXT LINKED</span>}/>
     <div className="vision-grid"><section className="panel vision-upload"><div className="panel-heading"><div className="heading-label"><Video size={15}/><span>CAMERA FEED ANALYSIS</span></div><span className="ai-badge"><i/> READY</span></div>
       <input ref={inputRef} className="hidden-input" type="file" accept="image/*" onChange={e=>pick(e.target.files?.[0])}/>
@@ -129,7 +129,7 @@ function AnalyticsView({metrics,history,decision}) {
   const congestion=decision?.predicted_congestion;
   return <><SectionTitle eyebrow="INTELLIGENCE / PERFORMANCE" title="Analytics & traffic forecasts" description="Live analytics are derived from the same backend state driving the digital twin." action={<div className="range-tabs">{["LIVE","1 MIN","5 MIN","15 MIN","HISTORICAL"].map(x=><button key={x} className={range===x?"active":""} onClick={()=>setRange(x)}>{x}</button>)}</div>}/><div className="analytics-summary"><div className="panel summary-card"><span>Peak approach</span><b>{[["North",metrics.north||0],["South",metrics.south||0],["East",metrics.east||0],["West",metrics.west||0]].sort((a,b)=>b[1]-a[1])[0]?.[0]||"North"}</b><small>Current demand leader</small></div><div className="panel summary-card"><span>Intersection health</span><b className="green-text">{metrics.intersection_health}<small>/100</small></b><small>Based on occupancy and queue</small></div><div className="panel summary-card"><span>Flow throughput</span><b>{metrics.throughput_vph}<small> veh/h</small></b><small>Estimated from speed & flow</small></div><div className="panel summary-card"><span>Live samples</span><b>{history.length}<small> points</small></b><small>Captured this session</small></div></div>
     <div className="charts-grid"><ChartCard title="Traffic volume" unit="vehicles / approach" color="#66b5ff" values={vals("traffic_volume",metrics.traffic_volume)} labels={labels}/><ChartCard title="Queue length" unit="estimated vehicles" color="#f0bd5b" values={vals("queue_length",metrics.queue_length)} labels={labels}/><ChartCard title="Average speed" unit="km/h" color="#50dda0" values={vals("average_speed",metrics.average_speed)} labels={labels}/><ChartCard title="Throughput" unit="vehicles / hour" color="#aa8aff" values={vals("throughput_vph",metrics.throughput_vph)} labels={labels}/></div>
-    <section className="panel forecast-panel"><div className="panel-heading"><div className="heading-label"><Sparkles size={15}/><span>MODEL OUTLOOK</span></div><span className="ai-badge"><i/> RANDOM FOREST · ONLINE INFERENCE</span></div><div className="forecast-content"><div><small>Current congestion index</small><b>{congestion ?? "—"}<small>{congestion==null?"":"/100"}</small></b><span>Prediction uses current volume, queue, speed, weather and incident features.</span></div><div className="forecast-track"><div className="forecast-line"><i style={{left:`${Math.min(95,Math.max(5,congestion??0))}%`}}/></div><div className="forecast-labels"><span>LOW CONGESTION</span><span>MODERATE</span><span>SEVERE</span></div></div><div className="forecast-confidence"><span>Signal model status</span><b><i/> {decision?"Connected":"Awaiting inference"}</b></div></div></section>
+    <section className="panel forecast-panel"><div className="panel-heading"><div className="heading-label"><Sparkles size={15}/><span>MODEL OUTLOOK</span></div><span className="ai-badge"><i/> {decision ? "RANDOM FOREST · LIVE INFERENCE" : "RANDOM FOREST · OFFLINE"}</span></div><div className="forecast-content"><div><small>Current congestion index</small><b>{congestion ?? "—"}<small>{congestion==null?"":"/100"}</small></b><span>Prediction uses current volume, queue, speed, weather and incident features.</span></div><div className="forecast-track"><div className="forecast-line"><i style={{left:`${Math.min(95,Math.max(5,congestion??0))}%`}}/></div><div className="forecast-labels"><span>LOW CONGESTION</span><span>MODERATE</span><span>SEVERE</span></div></div><div className="forecast-confidence"><span>Signal model status</span><b><i/> {decision?"Connected":"Awaiting inference"}</b></div></div></section>
   </>;
 }
 
@@ -137,24 +137,28 @@ export default function App() {
   const [state,setState]=useState(initialState), [metrics,setMetrics]=useState({traffic_volume:0,average_speed:0,occupancy:0,queue_length:0,travel_time_min:0,throughput_vph:0,intersection_health:0});
   const [density,setDensity]=useState(.55), [incident,setIncident]=useState(false), [weather,setWeather]=useState("clear"), [aiControl,setAiControl]=useState(true), [decision,setDecision]=useState(null);
   const [scenarioHour,setScenarioHour]=useState(17);
-  const [screen,setScreen]=useState("twin"), [cameraMode,setCameraMode]=useState("Intersection"), [cameraResetKey,setCameraResetKey]=useState(0), [paused,setPaused]=useState(false), [speed,setSpeed]=useState(1), [history,setHistory]=useState([]), [error,setError]=useState("");
-  const connected=useRef(false);
+  const [screen,setScreen]=useState("twin"), [cameraMode,setCameraMode]=useState("Intersection"), [cameraResetKey,setCameraResetKey]=useState(0), [paused,setPaused]=useState(false), [speed,setSpeed]=useState(1), [history,setHistory]=useState([]), [error,setError]=useState(""), [connectionStatus,setConnectionStatus]=useState("connecting");
+  const connected=useRef(false), refreshing=useRef(false);
   const refresh = useCallback(async (advance=false) => {
+    if(refreshing.current)return;
+    refreshing.current=true;
     try {
       const s=advance?await tick():await getState(); setState(s); const m=await summary(); setMetrics(m); setError("");
       setHistory(prev=>[...prev,{...m,north:s.north,south:s.south,east:s.east,west:s.west,at:Date.now()}].slice(-900));
       if(aiControl){const d=await optimize({...s,current_phase:s.phase});setDecision(d)}
-    } catch { setError("Backend connection lost. Start the FastAPI service to restore the live data feed."); }
+      setConnectionStatus("connected");
+    } catch { setError("Backend connection lost. Start the FastAPI service to restore the live data feed.");setConnectionStatus("offline"); }
+    finally { refreshing.current=false; }
   },[aiControl]);
   useEffect(()=>{refresh(false).finally(()=>{connected.current=true});},[]);
-  useEffect(()=>{if(paused)return;const id=setInterval(()=>refresh(true),Math.max(500,1200/speed));return()=>clearInterval(id)},[refresh,paused,speed]);
+  useEffect(()=>{if(paused)return;const id=setInterval(()=>refresh(true),error?30000:Math.max(500,1200/speed));return()=>clearInterval(id)},[refresh,paused,speed,error]);
   useEffect(()=>{if(!connected.current)return;control({density,incident,weather,hour:scenarioHour}).then(setState).catch(()=>{});},[density,incident,weather,scenarioHour]);
   const doReset=async()=>{try{const s=await reset();setState(s);setDensity(.55);setIncident(false);setWeather("clear");setScenarioHour(17);setDecision(null);setHistory([])}catch{setError("Unable to reset the simulation. Check the backend connection.")}};
   const runScenario=async()=>{try{const s=await control({density,incident,weather,hour:scenarioHour});setState(s);const d=await optimize({...s,current_phase:s.phase});setDecision(d)}catch{setError("Scenario updated locally. Connect FastAPI to run the AI decision.")}};
   const fullscreen=()=>{const el=document.querySelector(".visual-card");if(el?.requestFullscreen)el.requestFullscreen().catch(()=>{})};
   const latestMetrics=useMemo(()=>({...metrics,north:state.north,south:state.south,east:state.east,west:state.west}),[metrics,state]);
-  const shared={state,metrics,decision,density,incident,weather,aiControl,setDensity,setIncident,setWeather,setAiControl,hour:scenarioHour,setHour:setScenarioHour,onReset:doReset,onScenario:runScenario,cameraMode,setCameraMode,cameraResetKey,onCameraReset:()=>setCameraResetKey(v=>v+1),paused,setPaused,speed,setSpeed,fullscreen};
-  return <div className="app-shell"><header className="topbar"><a className="brand" href="#home" onClick={e=>{e.preventDefault();setScreen("twin")}}><span className="brand-mark"><Activity size={18}/></span><span><b>GRIDLINE</b><small>TRAFFIC INTELLIGENCE</small></span></a><nav className="main-nav" aria-label="Main screens">{screenItems.map(({id,label,icon:Icon})=><button key={id} className={screen===id?"active":""} onClick={()=>setScreen(id)}><Icon size={15}/><span>{label}</span></button>)}</nav><div className="top-status"><span className="data-chip"><i className="pulse-dot"/> SYSTEM LIVE</span><button className="icon-button" title="Help"><CircleHelp size={16}/></button><div className="operator"><span>JD</span><b>Operator</b></div></div></header>
+  const shared={state,metrics,decision,connectionStatus,density,incident,weather,aiControl,setDensity,setIncident,setWeather,setAiControl,hour:scenarioHour,setHour:setScenarioHour,onReset:doReset,onScenario:runScenario,cameraMode,setCameraMode,cameraResetKey,onCameraReset:()=>setCameraResetKey(v=>v+1),paused,setPaused,speed,setSpeed,fullscreen};
+  return <div className="app-shell"><header className="topbar"><a className="brand" href="#home" onClick={e=>{e.preventDefault();setScreen("twin")}}><span className="brand-mark"><Activity size={18}/></span><span><b>GRIDLINE</b><small>TRAFFIC INTELLIGENCE</small></span></a><nav className="main-nav" aria-label="Main screens">{screenItems.map(({id,label,icon:Icon})=><button key={id} className={screen===id?"active":""} onClick={()=>setScreen(id)}><Icon size={15}/><span>{label}</span></button>)}</nav><div className="top-status"><span className="data-chip"><i className="pulse-dot"/> {connectionStatus === "connected" ? "SYSTEM LIVE" : connectionStatus === "connecting" ? "CONNECTING" : "BACKEND OFFLINE"}</span><button className="icon-button" title="Help"><CircleHelp size={16}/></button><div className="operator"><span>JD</span><b>Operator</b></div></div></header>
     {error&&<div className="error"><AlertTriangle size={15}/>{error}<button onClick={()=>refresh(false)}>Retry feed</button></div>}
     <main className="main-content">{screen==="twin"&&<TwinView {...shared}/>}{screen==="simulation"&&<SimulationView {...shared}/>}{screen==="vision"&&<VisionView state={state}/>}{screen==="control"&&<ControlView state={state} metrics={metrics} decision={decision} history={history} onReset={doReset} paused={paused} setPaused={setPaused}/>}{screen==="analytics"&&<AnalyticsView metrics={latestMetrics} history={history} decision={decision}/>}</main>
     <footer className="app-footer"><span>GRIDLINE <i/> SMART CITY TRAFFIC AI</span><span>FASTAPI <i/> RANDOM FOREST <i/> OPENCV <i/> THREE.JS</span><span>NYC DIGITAL TWIN · SC-NYC-01</span></footer>
